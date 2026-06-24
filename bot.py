@@ -80,6 +80,10 @@ async def server_monitor():
 async def on_ready():
     await bot.tree.sync(guild=MY_GUILD)
     server_monitor.start()
+    
+    # Ustawienie statusu bota
+    await bot.change_presence(activity=discord.Game(name="Stworzony przez MaxiDev"))
+    
     print("Bot gotowy!")
 
 @bot.tree.command(name="online", description="Wymuś ONLINE", guild=MY_GUILD)
