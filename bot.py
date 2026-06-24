@@ -1,8 +1,9 @@
+import os
 import discord
 from discord.ext import commands, tasks
 from mcstatus import JavaServer
-from datetime import datetime
-import os
+from datetime import datetime, timedelta
+
 # KONFIGURACJA
 TOKEN = os.environ.get("TOKEN")
 GUILD_ID = 1462813807679115401
@@ -18,7 +19,6 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-bot.auto_mode = True
 bot.status_message_id = None
 MY_GUILD = discord.Object(id=GUILD_ID)
 
@@ -26,8 +26,9 @@ def has_permission(member):
     return any(role.id in ALLOWED_ROLES for role in member.roles)
 
 def build_embed(is_online, players=0, max_players=0, ping=0):
-    now = datetime.now().strftime("%d.%m.%Y • %H:%M")
-    # Tytuł i kolor zależnie od stanu
+    # Dodajemy 2 godziny do czasu UTC, żeby był czas w Polsce
+    now = (datetime.utcnow() + timedelta(hours=2)).strftime("%d.%m.%Y • %H:%M")
+    
     title = "🟢 | STATUS SERWERA MINECRAFT" if is_online else "🔴 | STATUS SERWERA MINECRAFT"
     color = 0x57F287 if is_online else 0xED4245
     
@@ -48,7 +49,6 @@ async def update_status_message(embed):
     channel = bot.get_channel(CHANNEL_ID)
     if not channel: return
     
-    # Usuwamy stare wiadomości bota z tego kanału (maks 5 ostatnich)
     async for msg in channel.history(limit=5):
         if msg.author == bot.user and msg.id != bot.status_message_id:
             await msg.delete()
@@ -65,42 +65,29 @@ async def update_status_message(embed):
 
 @tasks.loop(seconds=60)
 async def server_monitor():
-    if not bot.auto_mode: return
     try:
         server = JavaServer.lookup(SERVER_IP, timeout=5)
-        status = server.status()
-        if status.players.online == 0 and status.players.max == 0: raise Exception()
+        # Używamy async_status, żeby nie blokować wątku bota
+        status = await server.async_status()
         await update_status_message(build_embed(True, status.players.online, status.players.max, round(status.latency)))
     except:
         await update_status_message(build_embed(False))
 
 @bot.event
-async def setup_hook():
-    await bot.tree.sync(guild=MY_GUILD)
-
-@bot.event
 async def on_ready():
+    await bot.tree.sync(guild=MY_GUILD)
     server_monitor.start()
     print("Bot gotowy!")
-
-# Komendy... (reszta bez zmian)
-@bot.tree.command(name="auto", description="Włącz tryb AUTO", guild=MY_GUILD)
-async def cmd_auto(interaction: discord.Interaction):
-    if not has_permission(interaction.user): return await interaction.response.send_message("❌", ephemeral=True)
-    bot.auto_mode = True
-    await interaction.response.send_message("✅ Włączono tryb AUTO.", ephemeral=True)
 
 @bot.tree.command(name="online", description="Wymuś ONLINE", guild=MY_GUILD)
 async def cmd_online(interaction: discord.Interaction):
     if not has_permission(interaction.user): return await interaction.response.send_message("❌", ephemeral=True)
-    bot.auto_mode = False
     await update_status_message(build_embed(True, 0, 0, 0))
     await interaction.response.send_message("✅ Wymuszono ONLINE.", ephemeral=True)
 
 @bot.tree.command(name="offline", description="Wymuś OFFLINE", guild=MY_GUILD)
 async def cmd_offline(interaction: discord.Interaction):
     if not has_permission(interaction.user): return await interaction.response.send_message("❌", ephemeral=True)
-    bot.auto_mode = False
     await update_status_message(build_embed(False))
     await interaction.response.send_message("✅ Wymuszono OFFLINE.", ephemeral=True)
 
