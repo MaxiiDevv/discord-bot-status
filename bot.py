@@ -1,4 +1,5 @@
 import os
+import asyncio
 import discord
 
 from discord.ext import commands, tasks
@@ -8,7 +9,9 @@ import pytz
 
 from aiohttp import web
 
+# =========================
 # KONFIGURACJA
+# =========================
 
 TOKEN = os.environ.get("TOKEN")
 
@@ -36,7 +39,7 @@ MY_GUILD = discord.Object(id=GUILD_ID)
 
 
 # =========================
-# WEB SERVER (KEEP ALIVE)
+# WEB SERVER (KEEP ALIVE DLA RENDERA)
 # =========================
 
 async def handle(request):
@@ -51,7 +54,8 @@ async def start_web_server():
     runner = web.AppRunner(app)
     await runner.setup()
 
-    port = int(os.environ.get("PORT", 8080))
+    # Pobiera port ustawiony przez Render lub domyślnie 10000
+    port = int(os.environ.get("PORT", 10000))
 
     site = web.TCPSite(
         runner,
@@ -71,7 +75,7 @@ def has_permission(member):
     return any(role.id in ALLOWED_ROLES for role in member.roles)
 
 
-def build_embed(is_online, players=0, max_players=0, ping=0):
+def build_embed(is_online, players="0", max_players="0", ping=0):
     warsaw_tz = pytz.timezone("Europe/Warsaw")
     now = datetime.now(warsaw_tz).strftime("%d.%m.%Y • %H:%M")
 
@@ -159,16 +163,16 @@ async def update_status_message(embed):
 # MONITORING SERWERA MC
 # =========================
 
-@tasks.loop(seconds=60)
+@tasks.loop(minutes=2)
 async def server_monitor():
     try:
+        # Próba 1: Pełny status (Pobiera ping i listę graczy)
         server = JavaServer.lookup(
             SERVER_IP,
-            timeout=5
+            timeout=10
         )
-
         status = await server.async_status()
-
+        
         await update_status_message(
             build_embed(
                 True,
@@ -178,10 +182,21 @@ async def server_monitor():
             )
         )
 
-    except:
-        await update_status_message(
-            build_embed(False)
-        )
+    except Exception as e:
+        # Próba 2: Jeśli serwer Aternos odrzucił zapytanie statusu, spróbuj wysłać zwykły ping
+        try:
+            server = JavaServer.lookup(SERVER_IP, timeout=10)
+            ping_latency = await server.async_ping()
+            
+            # Wpisujemy "?" w pole graczy, bo ping nie zwraca takich danych, ale serwer JEST włączony
+            await update_status_message(
+                build_embed(True, "?", "?", round(ping_latency))
+            )
+        except:
+            # Próba 3: Jeśli status i ping zawiodły, serwer jest wyłączony
+            await update_status_message(
+                build_embed(False)
+            )
 
 
 # =========================
@@ -191,8 +206,9 @@ async def server_monitor():
 @bot.event
 async def on_ready():
 
+    # Bezpieczne uruchamianie serwera WWW jako zadanie w tle (wymaga import asyncio)
     if not hasattr(bot, "web_server_started"):
-        await start_web_server()
+        bot.loop.create_task(start_web_server())
         bot.web_server_started = True
 
     await bot.tree.sync(guild=MY_GUILD)
@@ -223,7 +239,7 @@ async def cmd_online(interaction: discord.Interaction):
 
     if not has_permission(interaction.user):
         return await interaction.response.send_message(
-            "❌",
+            "❌ Nie masz uprawnień.",
             ephemeral=True
         )
 
@@ -246,7 +262,7 @@ async def cmd_offline(interaction: discord.Interaction):
 
     if not has_permission(interaction.user):
         return await interaction.response.send_message(
-            "❌",
+            "❌ Nie masz uprawnień.",
             ephemeral=True
         )
 
@@ -264,4 +280,5 @@ async def cmd_offline(interaction: discord.Interaction):
 # START BOTA
 # =========================
 
-bot.run(TOKEN)
+if __name__ == "__main__":
+    bot.run(TOKEN)
