@@ -3,7 +3,7 @@ import discord
 from discord.ext import commands, tasks
 from mcstatus import JavaServer
 from datetime import datetime, timedelta
-
+import pytz
 # KONFIGURACJA
 TOKEN = os.environ.get("TOKEN")
 GUILD_ID = 1462813807679115401
@@ -26,8 +26,11 @@ def has_permission(member):
     return any(role.id in ALLOWED_ROLES for role in member.roles)
 
 def build_embed(is_online, players=0, max_players=0, ping=0):
-    # Dodajemy 2 godziny do czasu UTC, żeby był czas w Polsce
-    now = (datetime.utcnow() + timedelta(hours=2)).strftime("%d.%m.%Y • %H:%M")
+    # Wymuszamy sztywno strefę czasową Warszawy
+    warsaw_tz = pytz.timezone('Europe/Warsaw')
+    now = datetime.now(warsaw_tz).strftime("%d.%m.%Y • %H:%M")
+    
+    # ... reszta bez zmian ...
     
     title = "🟢 | STATUS SERWERA MINECRAFT" if is_online else "🔴 | STATUS SERWERA MINECRAFT"
     color = 0x57F287 if is_online else 0xED4245
