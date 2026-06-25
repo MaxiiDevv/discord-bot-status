@@ -162,14 +162,16 @@ async def update_status_message(embed):
 @tasks.loop(minutes=2)
 async def server_monitor():
     api_url = f"https://api.mcsrvstat.us/3/{SERVER_IP}"
-    
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(api_url) as response:
                 if response.status == 200:
                     data = await response.json()
+                    # TO POKAŻE W LOGACH RENDERA CO WIDZI API
+                    print(f"DEBUG API: {data}") 
                     
                     is_online = data.get("online", False)
+                    # ... reszta kodu ...
                     
                     if is_online:
                         players_online = data.get("players", {}).get("online", 0)
