@@ -12,7 +12,7 @@ TOKEN = os.getenv("TOKEN")
 GUILD_ID = 1462813807679115401
 CHANNEL_ID = 1462835903629103206
 
-SERVER_IP = "tapir.aternos.host"
+SERVER_IP = "admincube.aternos.me"
 SERVER_VERSION = "1.21.4"
 
 ALLOWED_ROLES = [
@@ -99,7 +99,7 @@ def build_online_embed():
         inline=True
     )
 
-    embed.set_footer(text="Zrobiony przez maxidev")
+    embed.set_footer(text="Wbijaj!")
 
     return embed
 
@@ -128,7 +128,7 @@ def build_offline_embed():
         inline=True
     )
 
-    embed.set_footer(text="Zrobiony przez maxidev")
+    embed.set_footer(text="Poczekaj!")
 
     return embed
 
@@ -164,7 +164,7 @@ async def on_ready():
     print(f"Zalogowano jako {bot.user}")
 
     await bot.change_presence(
-        activity=discord.Game(name="Zrobiony przez maxidev")
+        activity=discord.Game(name="Zrobiony przez MaxiDevv")
     )
 
     if not hasattr(bot, "web_server_started"):
