@@ -18,7 +18,12 @@ TOKEN = os.environ.get("TOKEN")
 GUILD_ID = 1462813807679115401
 CHANNEL_ID = 1462835903629103206
 
-SERVER_IP = "tapir.aternos.host:31596"
+# Fizyczny adres omijający zabezpieczenia DNS Rendera/Aternosa
+SERVER_IP = "tapir.aternos.host"
+SERVER_PORT = 31596
+
+# Adres do ładnego wyświetlania w wiadomości na Discordzie
+DISPLAY_IP = "admincube.aternos.me"
 
 ALLOWED_ROLES = [
     1463171621811519570,
@@ -54,7 +59,6 @@ async def start_web_server():
     runner = web.AppRunner(app)
     await runner.setup()
 
-    # Pobiera port ustawiony przez Render lub domyślnie 10000
     port = int(os.environ.get("PORT", 10000))
 
     site = web.TCPSite(
@@ -94,7 +98,7 @@ def build_embed(is_online, players="0", max_players="0", ping=0):
 
     embed.add_field(
         name="🌍 Adres IP",
-        value=f"> `{SERVER_IP}`",
+        value=f"> `{DISPLAY_IP}`",
         inline=False
     )
 
@@ -166,34 +170,29 @@ async def update_status_message(embed):
 @tasks.loop(minutes=2)
 async def server_monitor():
     try:
-        # Próba 1: Pełny status (Pobiera ping i listę graczy)
-        server = JavaServer.lookup(
-            SERVER_IP,
-            timeout=10
-        )
+        # Próba 1: Łączymy się bezpośrednio z ominięciem .lookup()
+        server = JavaServer(SERVER_IP, SERVER_PORT, timeout=10)
         status = await server.async_status()
         
         await update_status_message(
-            build_embed(
-                True,
-                status.players.online,
-                status.players.max,
-                round(status.latency)
-            )
+            build_embed(True, status.players.online, status.players.max, round(status.latency))
         )
 
     except Exception as e:
-        # Próba 2: Jeśli serwer Aternos odrzucił zapytanie statusu, spróbuj wysłać zwykły ping
+        # Logowanie błędu, żebyśmy w końcu wiedzieli DLACZEGO serwer jest offline
+        print(f"[STATUS ERROR] Nie udało się pobrać statusu: {e}")
+        
         try:
-            server = JavaServer.lookup(SERVER_IP, timeout=10)
+            # Próba 2: Sam ping, jeśli status zostanie zablokowany
+            server = JavaServer(SERVER_IP, SERVER_PORT, timeout=10)
             ping_latency = await server.async_ping()
             
-            # Wpisujemy "?" w pole graczy, bo ping nie zwraca takich danych, ale serwer JEST włączony
             await update_status_message(
                 build_embed(True, "?", "?", round(ping_latency))
             )
-        except:
-            # Próba 3: Jeśli status i ping zawiodły, serwer jest wyłączony
+        except Exception as e2:
+            print(f"[PING ERROR] Nie udało się spingować serwera: {e2}")
+            
             await update_status_message(
                 build_embed(False)
             )
@@ -206,7 +205,6 @@ async def server_monitor():
 @bot.event
 async def on_ready():
 
-    # Bezpieczne uruchamianie serwera WWW jako zadanie w tle (wymaga import asyncio)
     if not hasattr(bot, "web_server_started"):
         bot.loop.create_task(start_web_server())
         bot.web_server_started = True
