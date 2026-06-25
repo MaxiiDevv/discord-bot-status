@@ -19,8 +19,9 @@ GUILD_ID = 1462813807679115401
 CHANNEL_ID = 1462835903629103206
 
 # Fizyczny adres omijający zabezpieczenia DNS Rendera/Aternosa
-SERVER_IP = "tapir.aternos.host"
-SERVER_PORT = 31596
+SERVER_IP = "mc.hypixel.net"
+SERVER_PORT = 25565
+DISPLAY_IP = "mc.hypixel.net"
 
 # Adres do ładnego wyświetlania w wiadomości na Discordzie
 DISPLAY_IP = "admincube.aternos.me"
