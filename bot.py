@@ -1,7 +1,6 @@
 import os
 import discord
 from discord.ext import commands
-from discord import app_commands
 from aiohttp import web
 
 # =========================
@@ -31,20 +30,23 @@ ALLOWED_ROLES = [
 
 intents = discord.Intents.default()
 
-bot = commands.Bot(command_prefix="!", intents=intents)
+bot = commands.Bot(
+    command_prefix="!",
+    intents=intents
+)
 
-guild = discord.Object(id=GUILD_ID)
+MY_GUILD = discord.Object(id=GUILD_ID)
 
 status_message_id = None
 
 # =========================
-# KEEP ALIVE (RENDER)
+# WEB SERVER (RENDER)
 # =========================
 
 async def home(request):
     return web.Response(text="Bot działa!")
 
-async def start_webserver():
+async def start_web_server():
     app = web.Application()
     app.router.add_get("/", home)
 
@@ -52,16 +54,25 @@ async def start_webserver():
     await runner.setup()
 
     port = int(os.environ.get("PORT", 10000))
-    site = web.TCPSite(runner, "0.0.0.0", port)
+
+    site = web.TCPSite(
+        runner,
+        host="0.0.0.0",
+        port=port
+    )
 
     await site.start()
 
 # =========================
-# POMOCNICZE
+# UPRAWNIENIA
 # =========================
 
 def has_permission(member):
     return any(role.id in ALLOWED_ROLES for role in member.roles)
+
+# =========================
+# EMBEDY
+# =========================
 
 def build_online_embed():
     embed = discord.Embed(
@@ -121,12 +132,16 @@ def build_offline_embed():
 
     return embed
 
-async def update_status(embed):
+# =========================
+# AKTUALIZACJA WIADOMOŚCI
+# =========================
+
+async def update_status_message(embed):
     global status_message_id
 
     channel = bot.get_channel(CHANNEL_ID)
 
-    if not channel:
+    if channel is None:
         return
 
     if status_message_id:
@@ -152,22 +167,22 @@ async def on_ready():
         activity=discord.Game(name="Zrobiony przez maxidev")
     )
 
-    await bot.tree.sync(guild=guild)
+    if not hasattr(bot, "web_server_started"):
+        bot.loop.create_task(start_web_server())
+        bot.web_server_started = True
 
-    if not hasattr(bot, "web_started"):
-        bot.loop.create_task(start_webserver())
-        bot.web_started = True
+    await bot.tree.sync(guild=MY_GUILD)
 
     print("Bot gotowy!")
 
 # =========================
-# SLASH COMMANDS
+# KOMENDY
 # =========================
 
 @bot.tree.command(
     name="online",
     description="Ustaw status ONLINE",
-    guild=guild
+    guild=MY_GUILD
 )
 async def online(interaction: discord.Interaction):
 
@@ -178,17 +193,17 @@ async def online(interaction: discord.Interaction):
         )
         return
 
-    await update_status(build_online_embed())
+    await update_status_message(build_online_embed())
 
     await interaction.response.send_message(
-        "✅ Status ustawiony na ONLINE.",
+        "✅ Status ustawiono na ONLINE.",
         ephemeral=True
     )
 
 @bot.tree.command(
     name="offline",
     description="Ustaw status OFFLINE",
-    guild=guild
+    guild=MY_GUILD
 )
 async def offline(interaction: discord.Interaction):
 
@@ -199,10 +214,10 @@ async def offline(interaction: discord.Interaction):
         )
         return
 
-    await update_status(build_offline_embed())
+    await update_status_message(build_offline_embed())
 
     await interaction.response.send_message(
-        "✅ Status ustawiony na OFFLINE.",
+        "✅ Status ustawiono na OFFLINE.",
         ephemeral=True
     )
 
@@ -211,4 +226,3 @@ async def offline(interaction: discord.Interaction):
 # =========================
 
 bot.run(TOKEN)
-```
