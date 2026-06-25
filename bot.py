@@ -1,141 +1,215 @@
+```python
 import os
-import asyncio
 import discord
-import aiohttp
-import pytz
-
-from discord.ext import commands, tasks
-from datetime import datetime
+from discord.ext import commands
+from discord import app_commands
 from aiohttp import web
 
 # =========================
 # KONFIGURACJA
 # =========================
-TOKEN = os.environ.get("TOKEN")
+
+TOKEN = os.getenv("TOKEN")
+
 GUILD_ID = 1462813807679115401
 CHANNEL_ID = 1462835903629103206
 
-# Adres fizyczny serwera (użyj tego z Twojego Aternosa)
 SERVER_IP = "tapir.aternos.host"
+SERVER_VERSION = "1.21.4"
 
 ALLOWED_ROLES = [
-    1463171621811519570, 1491760080444592138, 1463171617713684480, 
-    1518158676605534208, 1519056707148316853, 1463171602681430016
+    1463171621811519570,
+    1491760080444592138,
+    1463171617713684480,
+    1518158676605534208,
+    1519056707148316853,
+    1463171602681430016
 ]
 
+# =========================
+# DISCORD
+# =========================
+
 intents = discord.Intents.default()
-intents.message_content = True
+
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-bot.status_message_id = None
-MY_GUILD = discord.Object(id=GUILD_ID)
+guild = discord.Object(id=GUILD_ID)
+
+status_message_id = None
 
 # =========================
-# WEB SERVER (KEEP ALIVE)
+# KEEP ALIVE (RENDER)
 # =========================
-async def handle(request): return web.Response(text="Bot aktywny!")
 
-async def start_web_server():
+async def home(request):
+    return web.Response(text="Bot działa!")
+
+async def start_webserver():
     app = web.Application()
-    app.add_routes([web.get('/', handle)])
+    app.router.add_get("/", home)
+
     runner = web.AppRunner(app)
     await runner.setup()
+
     port = int(os.environ.get("PORT", 10000))
-    site = web.TCPSite(runner, host="0.0.0.0", port=port)
+    site = web.TCPSite(runner, "0.0.0.0", port)
+
     await site.start()
-    print(f"Serwer WWW uruchomiony na porcie {port}")
 
 # =========================
-# FUNKCJE
+# POMOCNICZE
 # =========================
+
 def has_permission(member):
     return any(role.id in ALLOWED_ROLES for role in member.roles)
 
-def build_embed(is_online, players="0", max_players="0"):
-    now = datetime.now(pytz.timezone("Europe/Warsaw")).strftime("%d.%m.%Y • %H:%M")
-    embed = discord.Embed(title="🟢 | STATUS SERWERA" if is_online else "🔴 | STATUS SERWERA", 
-                          color=0x57F287 if is_online else 0xED4245)
-    embed.add_field(name="🌍 Adres IP", value=f"> `{SERVER_IP}`", inline=False)
-    if is_online:
-        embed.add_field(name="👥 Gracze", value=f"> `{players} / {max_players}`", inline=True)
-        embed.add_field(name="⚡ Status", value="> `Online`", inline=True)
-    else:
-        embed.add_field(name="❤️ Status", value="> Serwer jest wyłączony.", inline=False)
-    embed.add_field(name="🏷️ Wersja", value="> `1.21.4`", inline=True)
-    embed.set_footer(text=f"Ostatnia aktualizacja • {now}")
+def build_online_embed():
+    embed = discord.Embed(
+        title="🟢 STATUS SERWERA MINECRAFT",
+        description="Serwer jest aktualnie dostępny.",
+        color=0x57F287
+    )
+
+    embed.add_field(
+        name="🌍 Adres IP",
+        value=f"`{SERVER_IP}`",
+        inline=False
+    )
+
+    embed.add_field(
+        name="⚡ Status",
+        value="`ONLINE`",
+        inline=True
+    )
+
+    embed.add_field(
+        name="🏷️ Wersja",
+        value=f"`{SERVER_VERSION}`",
+        inline=True
+    )
+
+    embed.set_footer(text="Zrobiony przez maxidev")
+
     return embed
 
-async def update_status_message(embed):
+def build_offline_embed():
+    embed = discord.Embed(
+        title="🔴 STATUS SERWERA MINECRAFT",
+        description="Serwer jest aktualnie wyłączony.",
+        color=0xED4245
+    )
+
+    embed.add_field(
+        name="🌍 Adres IP",
+        value=f"`{SERVER_IP}`",
+        inline=False
+    )
+
+    embed.add_field(
+        name="⚡ Status",
+        value="`OFFLINE`",
+        inline=True
+    )
+
+    embed.add_field(
+        name="🏷️ Wersja",
+        value=f"`{SERVER_VERSION}`",
+        inline=True
+    )
+
+    embed.set_footer(text="Zrobiony przez maxidev")
+
+    return embed
+
+async def update_status(embed):
+    global status_message_id
+
     channel = bot.get_channel(CHANNEL_ID)
-    if not channel: return
-    async for msg in channel.history(limit=5):
-        if msg.author == bot.user and msg.id != bot.status_message_id:
-            try: await msg.delete()
-            except: pass
-    if bot.status_message_id:
+
+    if not channel:
+        return
+
+    if status_message_id:
         try:
-            msg = await channel.fetch_message(bot.status_message_id)
+            msg = await channel.fetch_message(status_message_id)
             await msg.edit(embed=embed)
             return
-        except: bot.status_message_id = None
-    new_msg = await channel.send(embed=embed)
-    bot.status_message_id = new_msg.id
+        except:
+            status_message_id = None
+
+    msg = await channel.send(embed=embed)
+    status_message_id = msg.id
 
 # =========================
-# MONITORING API
+# READY
 # =========================
-@tasks.loop(minutes=2)
-async def server_monitor():
-    print("--- Rozpoczynam sprawdzanie statusu przez API ---")
-    api_url = f"https://api.mcsrvstat.us/3/{SERVER_IP}"
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(api_url) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    print(f"DEBUG API: {data}")
-                    is_online = data.get("online", False)
-                    await update_status_message(build_embed(is_online, 
-                                                           data.get("players", {}).get("online", 0), 
-                                                           data.get("players", {}).get("max", 0)))
-                else:
-                    print(f"Błąd HTTP: {response.status}")
-    except Exception as e: 
-        print(f"[ERROR] API: {e}")
 
-# =========================
-# READY / START
-# =========================
 @bot.event
 async def on_ready():
     print(f"Zalogowano jako {bot.user}")
-    
-    if not hasattr(bot, "web_server_started"):
-        bot.loop.create_task(start_web_server())
-        bot.web_server_started = True
-        
-    await bot.tree.sync(guild=MY_GUILD)
-    
-    if not server_monitor.is_running():
-        print("Uruchamiam pętlę monitorowania...")
-        server_monitor.start()
-    
-    print("Bot gotowy do pracy!")
+
+    await bot.change_presence(
+        activity=discord.Game(name="Zrobiony przez maxidev")
+    )
+
+    await bot.tree.sync(guild=guild)
+
+    if not hasattr(bot, "web_started"):
+        bot.loop.create_task(start_webserver())
+        bot.web_started = True
+
+    print("Bot gotowy!")
 
 # =========================
-# KOMENDY
+# SLASH COMMANDS
 # =========================
-@bot.tree.command(name="online", description="Wymuś ONLINE", guild=MY_GUILD)
-async def cmd_online(interaction: discord.Interaction):
-    if not has_permission(interaction.user): return await interaction.response.send_message("❌ Brak uprawnień.", ephemeral=True)
-    await update_status_message(build_embed(True, "0", "0"))
-    await interaction.response.send_message("✅ Wymuszono ONLINE.", ephemeral=True)
 
-@bot.tree.command(name="offline", description="Wymuś OFFLINE", guild=MY_GUILD)
-async def cmd_offline(interaction: discord.Interaction):
-    if not has_permission(interaction.user): return await interaction.response.send_message("❌ Brak uprawnień.", ephemeral=True)
-    await update_status_message(build_embed(False))
-    await interaction.response.send_message("✅ Wymuszono OFFLINE.", ephemeral=True)
+@bot.tree.command(
+    name="online",
+    description="Ustaw status ONLINE",
+    guild=guild
+)
+async def online(interaction: discord.Interaction):
 
-if __name__ == "__main__":
-    bot.run(TOKEN)
+    if not has_permission(interaction.user):
+        await interaction.response.send_message(
+            "❌ Nie masz uprawnień.",
+            ephemeral=True
+        )
+        return
+
+    await update_status(build_online_embed())
+
+    await interaction.response.send_message(
+        "✅ Status ustawiony na ONLINE.",
+        ephemeral=True
+    )
+
+@bot.tree.command(
+    name="offline",
+    description="Ustaw status OFFLINE",
+    guild=guild
+)
+async def offline(interaction: discord.Interaction):
+
+    if not has_permission(interaction.user):
+        await interaction.response.send_message(
+            "❌ Nie masz uprawnień.",
+            ephemeral=True
+        )
+        return
+
+    await update_status(build_offline_embed())
+
+    await interaction.response.send_message(
+        "✅ Status ustawiony na OFFLINE.",
+        ephemeral=True
+    )
+
+# =========================
+# START
+# =========================
+
+bot.run(TOKEN)
+```
