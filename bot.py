@@ -1,12 +1,11 @@
 import os
 import asyncio
 import discord
-
-from discord.ext import commands, tasks
-from mcstatus import JavaServer
-from datetime import datetime
+import aiohttp
 import pytz
 
+from discord.ext import commands, tasks
+from datetime import datetime
 from aiohttp import web
 
 # =========================
@@ -18,13 +17,9 @@ TOKEN = os.environ.get("TOKEN")
 GUILD_ID = 1462813807679115401
 CHANNEL_ID = 1462835903629103206
 
-# Fizyczny adres omijający zabezpieczenia DNS Rendera/Aternosa
-SERVER_IP = "mc.hypixel.net"
-SERVER_PORT = 25565
-DISPLAY_IP = "mc.hypixel.net"
-
-# Adres do ładnego wyświetlania w wiadomości na Discordzie
-DISPLAY_IP = "admincube.aternos.me"
+# Zewnętrzne API poradzi sobie z domyślnym adresem!
+# Wpisz tu główny adres bez portu (np. admincube.aternos.me lub ZBZC.aternos.me)
+SERVER_IP = "admincube.aternos.me"
 
 ALLOWED_ROLES = [
     1463171621811519570,
@@ -73,14 +68,14 @@ async def start_web_server():
 
 
 # =========================
-# FUNKCJE
+# FUNKCJE POMOCNICZE
 # =========================
 
 def has_permission(member):
     return any(role.id in ALLOWED_ROLES for role in member.roles)
 
 
-def build_embed(is_online, players="0", max_players="0", ping=0):
+def build_embed(is_online, players="0", max_players="0"):
     warsaw_tz = pytz.timezone("Europe/Warsaw")
     now = datetime.now(warsaw_tz).strftime("%d.%m.%Y • %H:%M")
 
@@ -99,7 +94,7 @@ def build_embed(is_online, players="0", max_players="0", ping=0):
 
     embed.add_field(
         name="🌍 Adres IP",
-        value=f"> `{DISPLAY_IP}`",
+        value=f"> `{SERVER_IP}`",
         inline=False
     )
 
@@ -112,7 +107,7 @@ def build_embed(is_online, players="0", max_players="0", ping=0):
 
         embed.add_field(
             name="⚡ Ping",
-            value=f"> `{ping} ms`",
+            value="> `API`",  # Ponieważ korzystamy ze strony trzeciej, ping nie byłby wiarygodny
             inline=True
         )
     else:
@@ -124,7 +119,7 @@ def build_embed(is_online, players="0", max_players="0", ping=0):
 
     embed.add_field(
         name="🏷️ Wersja",
-        value="> `1.21.4`",
+        value="> `1.20.6 / 1.21.x`",
         inline=True
     )
 
@@ -150,13 +145,9 @@ async def update_status_message(embed):
 
     if bot.status_message_id:
         try:
-            msg = await channel.fetch_message(
-                bot.status_message_id
-            )
-
+            msg = await channel.fetch_message(bot.status_message_id)
             await msg.edit(embed=embed)
             return
-
         except:
             bot.status_message_id = None
 
@@ -165,38 +156,37 @@ async def update_status_message(embed):
 
 
 # =========================
-# MONITORING SERWERA MC
+# MONITORING SERWERA (OBEJŚCIE API)
 # =========================
 
 @tasks.loop(minutes=2)
 async def server_monitor():
+    api_url = f"https://api.mcsrvstat.us/3/{SERVER_IP}"
+    
     try:
-        # Próba 1: Łączymy się bezpośrednio z ominięciem .lookup()
-        server = JavaServer(SERVER_IP, SERVER_PORT, timeout=10)
-        status = await server.async_status()
-        
-        await update_status_message(
-            build_embed(True, status.players.online, status.players.max, round(status.latency))
-        )
-
+        async with aiohttp.ClientSession() as session:
+            async with session.get(api_url) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    
+                    is_online = data.get("online", False)
+                    
+                    if is_online:
+                        players_online = data.get("players", {}).get("online", 0)
+                        players_max = data.get("players", {}).get("max", 0)
+                        
+                        await update_status_message(
+                            build_embed(True, players_online, players_max)
+                        )
+                    else:
+                        await update_status_message(build_embed(False))
+                else:
+                    # Błąd serwera API
+                    await update_status_message(build_embed(False))
+                    
     except Exception as e:
-        # Logowanie błędu, żebyśmy w końcu wiedzieli DLACZEGO serwer jest offline
-        print(f"[STATUS ERROR] Nie udało się pobrać statusu: {e}")
-        
-        try:
-            # Próba 2: Sam ping, jeśli status zostanie zablokowany
-            server = JavaServer(SERVER_IP, SERVER_PORT, timeout=10)
-            ping_latency = await server.async_ping()
-            
-            await update_status_message(
-                build_embed(True, "?", "?", round(ping_latency))
-            )
-        except Exception as e2:
-            print(f"[PING ERROR] Nie udało się spingować serwera: {e2}")
-            
-            await update_status_message(
-                build_embed(False)
-            )
+        print(f"[API ERROR] Problem z połączeniem do mcsrvstat: {e}")
+        await update_status_message(build_embed(False))
 
 
 # =========================
@@ -205,7 +195,6 @@ async def server_monitor():
 
 @bot.event
 async def on_ready():
-
     if not hasattr(bot, "web_server_started"):
         bot.loop.create_task(start_web_server())
         bot.web_server_started = True
@@ -216,63 +205,33 @@ async def on_ready():
         server_monitor.start()
 
     await bot.change_presence(
-        activity=discord.Game(
-            name="Stworzony przez MaxiDev"
-        )
+        activity=discord.Game(name="Obejście Aternosa Aktywne")
     )
 
     print(f"Zalogowano jako {bot.user}")
-    print("Bot gotowy!")
+    print("Bot gotowy do użycia z mcsrvstat.us!")
 
 
 # =========================
 # KOMENDY
 # =========================
 
-@bot.tree.command(
-    name="online",
-    description="Wymuś ONLINE",
-    guild=MY_GUILD
-)
+@bot.tree.command(name="online", description="Wymuś ONLINE", guild=MY_GUILD)
 async def cmd_online(interaction: discord.Interaction):
-
     if not has_permission(interaction.user):
-        return await interaction.response.send_message(
-            "❌ Nie masz uprawnień.",
-            ephemeral=True
-        )
+        return await interaction.response.send_message("❌ Brak uprawnień.", ephemeral=True)
 
-    await update_status_message(
-        build_embed(True, 0, 0, 0)
-    )
-
-    await interaction.response.send_message(
-        "✅ Wymuszono ONLINE.",
-        ephemeral=True
-    )
+    await update_status_message(build_embed(True, "0", "0"))
+    await interaction.response.send_message("✅ Wymuszono ONLINE.", ephemeral=True)
 
 
-@bot.tree.command(
-    name="offline",
-    description="Wymuś OFFLINE",
-    guild=MY_GUILD
-)
+@bot.tree.command(name="offline", description="Wymuś OFFLINE", guild=MY_GUILD)
 async def cmd_offline(interaction: discord.Interaction):
-
     if not has_permission(interaction.user):
-        return await interaction.response.send_message(
-            "❌ Nie masz uprawnień.",
-            ephemeral=True
-        )
+        return await interaction.response.send_message("❌ Brak uprawnień.", ephemeral=True)
 
-    await update_status_message(
-        build_embed(False)
-    )
-
-    await interaction.response.send_message(
-        "✅ Wymuszono OFFLINE.",
-        ephemeral=True
-    )
+    await update_status_message(build_embed(False))
+    await interaction.response.send_message("✅ Wymuszono OFFLINE.", ephemeral=True)
 
 
 # =========================
